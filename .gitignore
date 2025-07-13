@@ -3,3 +3,4 @@ whisper.cpp/
 *.wav
 test.py
 testing.py
+__pycache__/
