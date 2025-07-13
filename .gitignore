@@ -1,0 +1,5 @@
+kai_env/
+whisper.cpp/
+*.wav
+test.py
+testing.py
