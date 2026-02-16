@@ -1,11 +1,36 @@
+# ─── Aegis: Offline Voice-First Personal Health AI ───
+# Core ML
 torch
 torchaudio==2.2.2+cu121
 --extra-index-url https://download.pytorch.org/whl/cu121
+
+# TTS
 TTS
 fugashi
-requests
 langdetect
+
+# STT (Whisper)
 openai-whisper
 ffmpeg-python
+
+# Audio I/O
 soundfile
 sounddevice
+numpy
+
+# Audio analysis (emotion detection)
+librosa
+
+# LLM (local Ollama client)
+requests
+
+# Encryption & privacy
+cryptography
+
+# Fallback TTS (Windows SAPI5 / espeak)
+pyttsx3
+
+# Japanese tokenization dictionary
+unidic-lite
+
+# Database (built-in sqlite3, no extra dep needed)
