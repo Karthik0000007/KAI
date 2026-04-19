@@ -152,18 +152,42 @@ def classify_emotion(features: dict, transcript: Optional[str] = None) -> Emotio
     if transcript:
         text_lower = transcript.lower()
         linguistic_signals = {
-            "stressed": ["stressed", "overwhelmed", "too much", "can't handle",
-                         "pressure", "deadline", "worried about work",
-                         "ストレス", "大変", "辛い", "きつい"],
-            "anxious": ["anxious", "nervous", "panic", "scared", "afraid",
-                        "heart racing", "can't breathe", "worry",
-                        "不安", "怖い", "心配", "緊張"],
-            "fatigued": ["tired", "exhausted", "sleepy", "no energy", "drained",
-                         "worn out", "can't sleep", "insomnia",
-                         "疲れ", "眠い", "だるい", "しんどい"],
-            "calm": ["relaxed", "peaceful", "fine", "good", "great", "wonderful",
-                     "happy", "content",
-                     "元気", "良い", "楽", "気持ちいい"],
+            "stressed": [
+                # English keywords
+                "stressed", "overwhelmed", "too much", "can't handle",
+                "pressure", "deadline", "worried about work",
+                # Japanese keywords - expanded coverage
+                "ストレス", "大変", "辛い", "きつい", "プレッシャー", 
+                "締め切り", "仕事が心配", "無理", "限界", "追い詰め",
+                "やばい", "間に合わ", "手に負え"
+            ],
+            "anxious": [
+                # English keywords
+                "anxious", "nervous", "panic", "scared", "afraid",
+                "heart racing", "can't breathe", "worry",
+                # Japanese keywords - expanded coverage
+                "不安", "怖い", "心配", "緊張", "パニック", "恐れ",
+                "ドキドキ", "息苦し", "落ち着か", "そわそわ",
+                "気になる", "気になって", "びくびく", "おびえ"
+            ],
+            "fatigued": [
+                # English keywords
+                "tired", "exhausted", "sleepy", "no energy", "drained",
+                "worn out", "can't sleep", "insomnia",
+                # Japanese keywords - expanded coverage
+                "疲れ", "眠い", "だるい", "しんどい", "疲労", "へとへと",
+                "くたくた", "ぐったり", "眠れ", "不眠", "力が出",
+                "やる気が出", "消耗", "バテ"
+            ],
+            "calm": [
+                # English keywords
+                "relaxed", "peaceful", "fine", "good", "great", "wonderful",
+                "happy", "content",
+                # Japanese keywords - expanded coverage
+                "元気", "良い", "楽", "気持ちいい", "気持ち良", "リラックス", "穏やか",
+                "平和", "幸せ", "満足", "快適", "安心", "落ち着い",
+                "すっきり", "爽やか", "最高"
+            ],
         }
         for emotion, keywords in linguistic_signals.items():
             for kw in keywords:
@@ -219,3 +243,67 @@ def emotion_to_tone_mode(emotion_label: str) -> str:
         "neutral": "neutral",
     }
     return mapping.get(emotion_label, "neutral")
+
+
+# ─── Async Wrappers ──────────────────────────────────────────────────────────
+
+async def extract_audio_features_async(audio_path: str, sr: int = SAMPLE_RATE) -> dict:
+    """
+    Async wrapper for extract_audio_features using asyncio.to_thread.
+    
+    Returns dict with audio features.
+    """
+    import asyncio
+    return await asyncio.to_thread(extract_audio_features, audio_path, sr)
+
+
+async def classify_emotion_async(features: dict, transcript: Optional[str] = None) -> EmotionResult:
+    """
+    Async wrapper for classify_emotion using asyncio.to_thread.
+    
+    Returns an EmotionResult with label and confidence.
+    """
+    import asyncio
+    return await asyncio.to_thread(classify_emotion, features, transcript)
+
+
+async def analyze_emotion_async(audio_path: str, transcript: Optional[str] = None) -> EmotionResult:
+    """
+    Async version of full emotion analysis pipeline with graceful degradation:
+      1. Extract features from audio file
+      2. Classify emotion
+    
+    Implements:
+    - Retry logic (2 attempts) for transient failures
+    - Timeout handling (10s per attempt)
+    - Fallback to neutral emotion on failure
+    
+    This function runs the blocking operations in a thread pool to avoid
+    blocking the async event loop.
+    
+    Returns:
+        EmotionResult with emotion label, confidence, and audio features.
+    """
+    import asyncio
+    from core.error_handling import with_retry_and_timeout, FallbackStrategies
+    
+    logger.info(f"Analyzing emotion from: {audio_path} (async)")
+    
+    try:
+        # Run with retry and timeout
+        features = await with_retry_and_timeout(
+            extract_audio_features,
+            audio_path,
+            max_retries=2,
+            timeout=10.0,
+            initial_delay=0.5
+        )
+        result = await asyncio.to_thread(classify_emotion, features, transcript)
+        
+        logger.info(f"Emotion: {result.label} (confidence={result.confidence:.2f})")
+        return result
+    
+    except Exception as e:
+        logger.error(f"Emotion analysis failed after retries: {e}")
+        # Use fallback strategy
+        return await FallbackStrategies.emotion_fallback(audio_path)
