@@ -147,58 +147,101 @@ class HealthDatabase:
     # ─── Health Check-ins ────────────────────────────────────────────────
 
     def save_checkin(self, checkin: HealthCheckIn) -> str:
-        """Save a health check-in with encryption and DP noise."""
-        data = checkin.to_dict()
-        data = sanitize_for_storage(data, self.NOISY_NUMERIC_FIELDS)
-        data = self._encrypt_sensitive(data)
+        """
+        Save a health check-in with encryption and DP noise.
+        
+        Implements graceful degradation:
+        - Retries on transient database errors (locked, busy)
+        - Logs error and continues on permanent failure
+        """
+        try:
+            data = checkin.to_dict()
+            data = sanitize_for_storage(data, self.NOISY_NUMERIC_FIELDS)
+            data = self._encrypt_sensitive(data)
 
-        conn = self._get_conn()
-        conn.execute("""
-            INSERT OR REPLACE INTO health_checkins
-            (id, timestamp, mood_score, sleep_hours, energy_level, pain_notes,
-             medication_taken, user_text, detected_emotion, emotion_confidence, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            data["id"], data["timestamp"], data.get("mood_score"),
-            data.get("sleep_hours"), data.get("energy_level"),
-            data.get("pain_notes"), 1 if data.get("medication_taken") else 0,
-            data.get("user_text"), data.get("detected_emotion"),
-            data.get("emotion_confidence"), data.get("notes"),
-        ))
-        conn.commit()
-        logger.info(f"Saved check-in {checkin.id}")
-        return checkin.id
+            conn = self._get_conn()
+            
+            # Retry logic for database locks
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO health_checkins
+                        (id, timestamp, mood_score, sleep_hours, energy_level, pain_notes,
+                         medication_taken, user_text, detected_emotion, emotion_confidence, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        data["id"], data["timestamp"], data.get("mood_score"),
+                        data.get("sleep_hours"), data.get("energy_level"),
+                        data.get("pain_notes"), 1 if data.get("medication_taken") else 0,
+                        data.get("user_text"), data.get("detected_emotion"),
+                        data.get("emotion_confidence"), data.get("notes"),
+                    ))
+                    conn.commit()
+                    logger.info(f"Saved check-in {checkin.id}")
+                    return checkin.id
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower() or "busy" in str(e).lower():
+                        if attempt < max_retries - 1:
+                            import time
+                            wait_time = 0.1 * (2 ** attempt)
+                            logger.warning(f"Database locked, retrying in {wait_time}s...")
+                            time.sleep(wait_time)
+                            continue
+                    raise
+        except Exception as e:
+            logger.error(f"Failed to save check-in {checkin.id}: {e}. Data may be lost.")
+            # Continue execution - don't crash on database errors
+            return checkin.id
 
     def get_recent_checkins(self, days: int = 7) -> List[Dict[str, Any]]:
-        """Get check-ins from the last N days."""
-        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT * FROM health_checkins WHERE timestamp >= ? ORDER BY timestamp DESC",
-            (cutoff,)
-        ).fetchall()
-        return [self._decrypt_sensitive(dict(r)) for r in rows]
+        """
+        Get check-ins from the last N days.
+        
+        Implements graceful degradation:
+        - Returns empty list on database errors
+        """
+        try:
+            cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT * FROM health_checkins WHERE timestamp >= ? ORDER BY timestamp DESC",
+                (cutoff,)
+            ).fetchall()
+            return [self._decrypt_sensitive(dict(r)) for r in rows]
+        except Exception as e:
+            logger.error(f"Failed to retrieve recent check-ins: {e}")
+            return []
 
     def get_checkin_stats(self, days: int = 7) -> Dict[str, Any]:
-        """Aggregate stats for proactive analysis."""
-        checkins = self.get_recent_checkins(days)
-        if not checkins:
+        """
+        Aggregate stats for proactive analysis.
+        
+        Implements graceful degradation:
+        - Returns default empty stats on errors
+        """
+        try:
+            checkins = self.get_recent_checkins(days)
+            if not checkins:
+                return {"count": 0, "avg_mood": None, "avg_sleep": None, "avg_energy": None}
+
+            moods = [c["mood_score"] for c in checkins if c.get("mood_score") is not None]
+            sleeps = [c["sleep_hours"] for c in checkins if c.get("sleep_hours") is not None]
+            energies = [c["energy_level"] for c in checkins if c.get("energy_level") is not None]
+            emotions = [c["detected_emotion"] for c in checkins if c.get("detected_emotion")]
+
+            return {
+                "count": len(checkins),
+                "avg_mood": round(sum(moods) / len(moods), 1) if moods else None,
+                "avg_sleep": round(sum(sleeps) / len(sleeps), 1) if sleeps else None,
+                "avg_energy": round(sum(energies) / len(energies), 1) if energies else None,
+                "recent_emotions": emotions[:5],
+                "low_mood_days": sum(1 for m in moods if m <= 3),
+                "low_sleep_days": sum(1 for s in sleeps if s < 5.0),
+            }
+        except Exception as e:
+            logger.error(f"Failed to compute check-in stats: {e}")
             return {"count": 0, "avg_mood": None, "avg_sleep": None, "avg_energy": None}
-
-        moods = [c["mood_score"] for c in checkins if c.get("mood_score") is not None]
-        sleeps = [c["sleep_hours"] for c in checkins if c.get("sleep_hours") is not None]
-        energies = [c["energy_level"] for c in checkins if c.get("energy_level") is not None]
-        emotions = [c["detected_emotion"] for c in checkins if c.get("detected_emotion")]
-
-        return {
-            "count": len(checkins),
-            "avg_mood": round(sum(moods) / len(moods), 1) if moods else None,
-            "avg_sleep": round(sum(sleeps) / len(sleeps), 1) if sleeps else None,
-            "avg_energy": round(sum(energies) / len(energies), 1) if energies else None,
-            "recent_emotions": emotions[:5],
-            "low_mood_days": sum(1 for m in moods if m <= 3),
-            "low_sleep_days": sum(1 for s in sleeps if s < 5.0),
-        }
 
     # ─── Medication Reminders ────────────────────────────────────────────
 
@@ -262,21 +305,31 @@ class HealthDatabase:
         return alert.id
 
     def get_unacknowledged_alerts(self) -> List[Dict[str, Any]]:
-        conn = self._get_conn()
-        rows = conn.execute(
-            "SELECT * FROM proactive_alerts WHERE acknowledged = 0 ORDER BY timestamp DESC"
-        ).fetchall()
-        results = []
-        for r in rows:
-            d = dict(r)
-            d = self._decrypt_sensitive(d)
-            if d.get("context"):
-                try:
-                    d["context"] = json.loads(d["context"])
-                except (json.JSONDecodeError, TypeError):
-                    d["context"] = {}
-            results.append(d)
-        return results
+        """
+        Get unacknowledged proactive alerts.
+        
+        Implements graceful degradation:
+        - Returns empty list on database errors
+        """
+        try:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT * FROM proactive_alerts WHERE acknowledged = 0 ORDER BY timestamp DESC"
+            ).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d = self._decrypt_sensitive(d)
+                if d.get("context"):
+                    try:
+                        d["context"] = json.loads(d["context"])
+                    except (json.JSONDecodeError, TypeError):
+                        d["context"] = {}
+                results.append(d)
+            return results
+        except Exception as e:
+            logger.error(f"Failed to retrieve unacknowledged alerts: {e}")
+            return []
 
     def acknowledge_alert(self, alert_id: str):
         conn = self._get_conn()
@@ -288,17 +341,42 @@ class HealthDatabase:
     # ─── Conversation History ────────────────────────────────────────────
 
     def save_conversation_turn(self, session_id: str, turn: ConversationTurn):
-        data = turn.to_dict()
-        data = self._encrypt_sensitive(data)
-        conn = self._get_conn()
-        conn.execute("""
-            INSERT INTO conversation_history
-            (session_id, role, content, timestamp, emotion, tone_mode)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (session_id, data["role"],
-              encrypt_string(data["content"], self.fernet),
-              data["timestamp"], data.get("emotion"), data.get("tone_mode")))
-        conn.commit()
+        """
+        Save a conversation turn to history.
+        
+        Implements graceful degradation:
+        - Retries on database locks
+        - Logs error and continues on failure
+        """
+        try:
+            data = turn.to_dict()
+            data = self._encrypt_sensitive(data)
+            conn = self._get_conn()
+            
+            # Retry logic for database locks
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    conn.execute("""
+                        INSERT INTO conversation_history
+                        (session_id, role, content, timestamp, emotion, tone_mode)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (session_id, data["role"],
+                          encrypt_string(data["content"], self.fernet),
+                          data["timestamp"], data.get("emotion"), data.get("tone_mode")))
+                    conn.commit()
+                    return
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower() or "busy" in str(e).lower():
+                        if attempt < max_retries - 1:
+                            import time
+                            wait_time = 0.1 * (2 ** attempt)
+                            logger.warning(f"Database locked, retrying in {wait_time}s...")
+                            time.sleep(wait_time)
+                            continue
+                    raise
+        except Exception as e:
+            logger.error(f"Failed to save conversation turn: {e}. Turn may be lost.")
 
     def get_session_history(self, session_id: str, limit: int = 20) -> List[Dict]:
         conn = self._get_conn()
