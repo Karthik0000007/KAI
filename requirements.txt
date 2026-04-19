@@ -33,4 +33,13 @@ pyttsx3
 # Japanese tokenization dictionary
 unidic-lite
 
+# Configuration management
+PyYAML
+
+# Structured logging
+structlog
+
+# Property-based testing
+hypothesis
+
 # Database (built-in sqlite3, no extra dep needed)
