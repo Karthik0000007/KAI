@@ -4,12 +4,14 @@ Emotion-adaptive local TTS with support for English (Coqui) and Japanese (VOICEV
 No cloud dependency.
 """
 
+import asyncio
 import os
 import json
 import shutil
 import subprocess
 import time
 import logging
+import platform
 from typing import Optional
 
 import torch
@@ -199,21 +201,48 @@ def _ensure_voicevox_running() -> bool:
             exe_path = found
             break
 
-    # Check common Windows install locations
+    # Check common install locations (Windows, macOS, Linux)
     if exe_path is None:
-        common_paths = [
-            os.path.expandvars(r"%LOCALAPPDATA%\Programs\VOICEVOX\run.exe"),
-            os.path.expandvars(r"%LOCALAPPDATA%\Programs\VOICEVOX\VOICEVOX.exe"),
-            r"C:\Program Files\VOICEVOX\run.exe",
-            r"C:\VOICEVOX\run.exe",
-        ]
-        # Also search PATH directories for any voicevox-related exe
-        path_dirs = os.environ.get("PATH", "").split(os.pathsep)
-        for d in path_dirs:
-            for name in ["run.exe", "VOICEVOX.exe", "voicevox_engine.exe"]:
-                candidate = os.path.join(d, name)
-                if os.path.isfile(candidate):
-                    common_paths.insert(0, candidate)
+        common_paths = []
+        
+        # Windows common locations
+        if os.name == "nt":
+            common_paths.extend([
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\VOICEVOX\run.exe"),
+                os.path.expandvars(r"%LOCALAPPDATA%\Programs\VOICEVOX\VOICEVOX.exe"),
+                r"C:\Program Files\VOICEVOX\run.exe",
+                r"C:\VOICEVOX\run.exe",
+            ])
+            # Also search PATH directories for any voicevox-related exe
+            path_dirs = os.environ.get("PATH", "").split(os.pathsep)
+            for d in path_dirs:
+                for name in ["run.exe", "VOICEVOX.exe", "voicevox_engine.exe"]:
+                    candidate = os.path.join(d, name)
+                    if os.path.isfile(candidate):
+                        common_paths.insert(0, candidate)
+        
+        # macOS common locations
+        elif os.name == "posix" and platform.system() == "Darwin":
+            common_paths.extend([
+                "/Applications/VOICEVOX.app/Contents/MacOS/run",
+                "/Applications/VOICEVOX.app/Contents/MacOS/VOICEVOX",
+                os.path.expanduser("~/Applications/VOICEVOX.app/Contents/MacOS/run"),
+                os.path.expanduser("~/Applications/VOICEVOX.app/Contents/MacOS/VOICEVOX"),
+                "/usr/local/bin/voicevox",
+                "/opt/homebrew/bin/voicevox",
+            ])
+        
+        # Linux common locations
+        elif os.name == "posix":
+            common_paths.extend([
+                "/opt/voicevox/run",
+                "/opt/voicevox/voicevox",
+                "/usr/local/bin/voicevox",
+                "/usr/bin/voicevox",
+                os.path.expanduser("~/.local/share/voicevox/run"),
+                os.path.expanduser("~/.local/share/voicevox/voicevox"),
+                os.path.expanduser("~/voicevox/run"),
+            ])
 
         for p in common_paths:
             if os.path.isfile(p):
@@ -226,22 +255,41 @@ def _ensure_voicevox_running() -> bool:
 
     logger.info(f"Starting VOICEVOX engine: {exe_path}")
     try:
+        # Platform-specific subprocess flags
+        if os.name == "nt":
+            # Windows: hide console window
+            creation_flags = subprocess.CREATE_NO_WINDOW
+        else:
+            # Unix-like: no special flags needed
+            creation_flags = 0
+        
         _voicevox_process = subprocess.Popen(
             [exe_path, "--host", "127.0.0.1", "--port", "50021"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creation_flags,
         )
+        
         # Wait for it to become ready
-        for _ in range(20):  # up to ~10 seconds
+        logger.info("Waiting for VOICEVOX engine to start...")
+        for attempt in range(20):  # up to ~10 seconds
             time.sleep(0.5)
             try:
                 r = requests.get(f"{VOICEVOX_URL}/version", timeout=1)
                 if r.status_code == 200:
-                    logger.info(f"VOICEVOX engine started (version {r.text.strip()})")
+                    version = r.text.strip()
+                    logger.info(f"VOICEVOX engine started successfully (version {version})")
                     return True
-            except Exception:
+            except requests.RequestException:
                 continue
+        
         logger.warning("VOICEVOX started but not responding in time")
+        return False
+    except FileNotFoundError as e:
+        logger.error(f"Failed to start VOICEVOX: executable not found - {e}")
+        return False
+    except PermissionError as e:
+        logger.error(f"Failed to start VOICEVOX: permission denied - {e}")
         return False
     except Exception as e:
         logger.error(f"Failed to start VOICEVOX: {e}")
@@ -329,3 +377,52 @@ def _play_audio(filepath: str):
             logger.info(f"Audio saved to {filepath}")
     except Exception as e:
         logger.error(f"Audio playback error: {e}")
+
+
+# ─── Async Wrappers ──────────────────────────────────────────────────────────
+
+async def speak_text_async(
+    text: str,
+    language: Optional[str] = None,
+    tone_mode: Optional[str] = None,
+    filename: Optional[str] = None,
+    play_audio: bool = True,
+) -> Optional[str]:
+    """
+    Async wrapper for speak_text using asyncio.to_thread.
+    
+    Implements graceful degradation:
+    - Retry logic (2 attempts) for transient TTS failures
+    - Timeout handling (30s per attempt)
+    - Fallback to silent mode on failure
+    
+    Synthesize speech from text with emotion-adaptive delivery.
+    
+    Args:
+        text: Text to speak.
+        language: 'en' or 'ja'. Auto-detected if None.
+        tone_mode: Response tone (calm/encouraging/gentle_support/neutral).
+        filename: Output WAV path.
+        play_audio: Whether to play the audio after synthesis.
+    
+    Returns:
+        Path to the generated audio file, or None on failure.
+    """
+    from core.error_handling import with_retry_and_timeout, FallbackStrategies
+    
+    try:
+        return await with_retry_and_timeout(
+            speak_text,
+            text,
+            language,
+            tone_mode,
+            filename,
+            play_audio,
+            max_retries=2,
+            timeout=30.0,
+            initial_delay=1.0
+        )
+    except Exception as e:
+        logger.error(f"TTS failed after all retries: {e}")
+        # Use fallback strategy (silent mode)
+        return await FallbackStrategies.tts_fallback(text, language or "en")
