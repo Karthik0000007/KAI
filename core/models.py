@@ -22,10 +22,19 @@ class EmotionResult:
     pitch_std: float                    # Hz
     energy_rms: float                   # RMS amplitude
     speech_rate: float                  # approx words per second
+    secondary_label: Optional[str] = None      # secondary emotion for mixed emotions
+    secondary_confidence: Optional[float] = None  # confidence of secondary emotion
+    is_mixed: bool = False              # True if mixed emotion detected
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+    
+    def get_emotion_description(self) -> str:
+        """Get human-readable emotion description."""
+        if self.is_mixed and self.secondary_label:
+            return f"{self.label} and {self.secondary_label}"
+        return self.label
 
 
 # ─── Health Check‑in ─────────────────────────────────────────────────────────
@@ -47,6 +56,34 @@ class HealthCheckIn:
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+    
+    def to_json(self) -> str:
+        """
+        Serialize HealthCheckIn to JSON string.
+        
+        Returns:
+            JSON string representation of the HealthCheckIn object
+        """
+        import json
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'HealthCheckIn':
+        """
+        Parse HealthCheckIn from JSON string.
+        
+        Args:
+            json_str: JSON string representation of a HealthCheckIn object
+        
+        Returns:
+            HealthCheckIn object parsed from JSON
+        
+        Raises:
+            ValueError: If JSON is invalid or missing required fields
+        """
+        import json
+        data = json.loads(json_str)
+        return cls(**data)
 
 
 # ─── Medication Reminder ─────────────────────────────────────────────────────
@@ -93,6 +130,7 @@ class ProactiveAlert:
     alert_type: str = ""                # "low_mood", "sleep_deficit", "medication_missed", etc.
     severity: str = "info"              # "info", "warning", "urgent"
     message: str = ""
+    explanation: str = ""               # Why this alert was generated (Requirement 10.10)
     acknowledged: bool = False
     context: Dict[str, Any] = field(default_factory=dict)
 
@@ -136,3 +174,46 @@ class Session:
         """Return recent turns for LLM context."""
         recent = self.turns[-max_turns:]
         return [t.to_dict() for t in recent]
+    
+    def add_emotion(self, emotion: EmotionResult):
+        """Add an emotion result to the history."""
+        self.emotion_history.append(emotion)
+    
+    def detect_emotion_transition(self) -> Optional[Dict[str, Any]]:
+        """
+        Detect emotion transitions between the last two turns.
+        
+        Returns a dictionary with transition information if a transition occurred,
+        or None if no transition detected.
+        
+        A transition is detected when:
+        - There are at least 2 emotions in history
+        - The emotion labels differ between the last two turns
+        
+        Returns:
+            Dictionary with:
+            - from_emotion: previous emotion label
+            - to_emotion: current emotion label
+            - from_confidence: previous emotion confidence
+            - to_confidence: current emotion confidence
+            - timestamp: timestamp of the transition
+            - transition_type: descriptive type (e.g., "calm_to_stressed")
+        """
+        if len(self.emotion_history) < 2:
+            return None
+        
+        previous = self.emotion_history[-2]
+        current = self.emotion_history[-1]
+        
+        # Check if emotion changed
+        if previous.label == current.label:
+            return None
+        
+        return {
+            "from_emotion": previous.label,
+            "to_emotion": current.label,
+            "from_confidence": previous.confidence,
+            "to_confidence": current.confidence,
+            "timestamp": current.timestamp,
+            "transition_type": f"{previous.label}_to_{current.label}"
+        }
