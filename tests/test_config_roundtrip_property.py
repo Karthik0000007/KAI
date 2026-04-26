@@ -48,11 +48,15 @@ def valid_models_config() -> SearchStrategy[Dict[str, Any]]:
         )),
         'ollama_url': st.just('http://localhost:11434'),
         'ollama_timeout': st.integers(min_value=30, max_value=300),
-        'coqui_model': st.text(min_size=1, max_size=100),
+        'coqui_model': st.text(min_size=1, max_size=100, alphabet=st.characters(
+            min_codepoint=32, max_codepoint=126  # Printable ASCII only
+        )),
         'voicevox_url': st.just('http://127.0.0.1:50021'),
         'voicevox_speaker_id': st.integers(min_value=0, max_value=50),
         'voicevox_auto_start': st.booleans(),
-        'voicevox_path': st.none() | st.text(min_size=1, max_size=100),
+        'voicevox_path': st.none() | st.text(min_size=1, max_size=100, alphabet=st.characters(
+            min_codepoint=32, max_codepoint=126  # Printable ASCII only
+        )),
     })
 
 
