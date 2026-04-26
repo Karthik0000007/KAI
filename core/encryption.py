@@ -1,6 +1,10 @@
 """
 Aegis Encryption Utilities
-Local encryption for health data at rest using Fernet (AES-128-CBC).
+Local encryption for health data at rest.
+
+**DEPRECATED**: This module provides backward compatibility with Fernet (AES-128-CBC).
+New code should use `core.key_manager.KeyManager` for AES-256-GCM encryption.
+
 Includes optional differential privacy noise injection.
 """
 
@@ -14,6 +18,9 @@ from typing import Any, Dict, Optional
 from cryptography.fernet import Fernet
 
 from core.config import ENCRYPTION_KEY_FILE, DIFFERENTIAL_PRIVACY_EPSILON, ENABLE_DIFFERENTIAL_PRIVACY
+
+# Note: For new code, use KeyManager instead
+# from core.key_manager import KeyManager
 
 
 # ─── Key Management ─────────────────────────────────────────────────────────
