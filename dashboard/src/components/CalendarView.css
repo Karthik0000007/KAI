@@ -1,0 +1,137 @@
+.calendar-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.calendar-description {
+  color: #666;
+  margin-bottom: 1rem;
+}
+
+.health-calendar {
+  width: 100%;
+  border: none;
+  font-family: inherit;
+}
+
+.health-calendar .react-calendar__tile {
+  padding: 1rem 0.5rem;
+  position: relative;
+  min-height: 80px;
+}
+
+.calendar-tile-content {
+  display: flex;
+  gap: 0.25rem;
+  justify-content: center;
+  margin-top: 0.25rem;
+  flex-wrap: wrap;
+}
+
+.tile-indicator {
+  font-size: 0.9rem;
+}
+
+.low-mood-day {
+  background-color: #ffe6e6 !important;
+}
+
+.low-sleep-day {
+  background-color: #e6f3ff !important;
+}
+
+.calendar-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.legend-icon {
+  font-size: 1.2rem;
+}
+
+.legend-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+}
+
+.legend-color.low-mood {
+  background-color: #ffe6e6;
+}
+
+.legend-color.low-sleep {
+  background-color: #e6f3ff;
+}
+
+.date-details {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.detail-label {
+  font-weight: 600;
+  color: #333;
+}
+
+.detail-value {
+  font-size: 1.5rem;
+  color: #667eea;
+  font-weight: 700;
+}
+
+.detail-bar {
+  width: 100%;
+  height: 12px;
+  background-color: #f0f0f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.detail-bar-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+  border-radius: 6px;
+}
+
+.mood-bar {
+  background: linear-gradient(90deg, #e74c3c 0%, #f39c12 50%, #2ecc71 100%);
+}
+
+.sleep-bar {
+  background: linear-gradient(90deg, #3498db 0%, #2ecc71 100%);
+}
+
+.energy-bar {
+  background: linear-gradient(90deg, #e67e22 0%, #f1c40f 100%);
+}
+
+@media (max-width: 768px) {
+  .health-calendar .react-calendar__tile {
+    min-height: 60px;
+    padding: 0.5rem 0.25rem;
+  }
+
+  .tile-indicator {
+    font-size: 0.8rem;
+  }
+}

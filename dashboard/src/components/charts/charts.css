@@ -1,0 +1,61 @@
+.chart-container {
+  position: relative;
+}
+
+.chart-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.btn-small {
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #e0e0e0;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: all 0.3s;
+}
+
+.btn-small:hover {
+  background: #f8f9fa;
+  border-color: #667eea;
+}
+
+.chart-hint {
+  text-align: center;
+  font-size: 0.85rem;
+  color: #999;
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+
+.no-data {
+  text-align: center;
+  padding: 2rem;
+  color: #999;
+  font-style: italic;
+}
+
+.correlation-stats {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+}
+
+.correlation-stats p {
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
+}
+
+.correlation-stats strong {
+  color: #333;
+}
+
+.correlation-hint {
+  color: #666;
+  font-style: italic;
+}

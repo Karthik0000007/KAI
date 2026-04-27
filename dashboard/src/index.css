@@ -1,0 +1,52 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f7fa;
+  color: #333;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+/* High Contrast Theme */
+body.high-contrast {
+  background-color: #000;
+  color: #fff;
+}
+
+body.high-contrast .card {
+  background-color: #1a1a1a;
+  border: 2px solid #fff;
+}
+
+body.high-contrast .btn {
+  border: 2px solid #fff;
+}
+
+/* Large Text Mode */
+body.large-text {
+  font-size: 1.25rem;
+}
+
+body.large-text h1 {
+  font-size: 2.5rem;
+}
+
+body.large-text h2 {
+  font-size: 2rem;
+}
+
+body.large-text h3 {
+  font-size: 1.75rem;
+}
