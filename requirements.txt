@@ -4,6 +4,9 @@ torch
 torchaudio==2.2.2+cu121
 --extra-index-url https://download.pytorch.org/whl/cu121
 
+# Speaker Recognition (Voice Biometrics)
+speechbrain
+
 # TTS
 TTS
 fugashi
@@ -41,5 +44,17 @@ structlog
 
 # Property-based testing
 hypothesis
+
+# BLE wearable integration
+bleak
+
+# Computer vision
+opencv-python
+
+# Web framework for dashboard API
+fastapi
+uvicorn[standard]
+python-multipart
+websockets
 
 # Database (built-in sqlite3, no extra dep needed)
