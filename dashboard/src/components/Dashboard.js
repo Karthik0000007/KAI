@@ -96,7 +96,11 @@ function Dashboard({ token, onLogout }) {
   const toggleTheme = () => {
     const newTheme = theme === 'normal' ? 'high-contrast' : 'normal';
     setTheme(newTheme);
-    document.body.className = newTheme;
+    if (newTheme === 'high-contrast') {
+      document.body.classList.add('high-contrast');
+    } else {
+      document.body.classList.remove('high-contrast');
+    }
   };
 
   const toggleTextSize = () => {
@@ -186,12 +190,14 @@ function Dashboard({ token, onLogout }) {
         </button>
       </nav>
 
-      <div className="date-range-selector">
+      <div className="date-range-selector" role="search" aria-label="Time range selector">
         <label htmlFor="date-range">Time Range:</label>
         <select
           id="date-range"
           value={dateRange}
           onChange={(e) => setDateRange(Number(e.target.value))}
+          aria-label="Select number of days to view"
+          tabIndex={0}
         >
           <option value={7}>Last 7 days</option>
           <option value={30}>Last 30 days</option>

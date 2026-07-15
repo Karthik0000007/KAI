@@ -13,21 +13,30 @@ import time
 import logging
 import platform
 from typing import Optional
-
 import torch
 import requests
-from TTS.api import TTS
-from TTS.utils.radam import RAdam
+import logging
+
+logger = logging.getLogger("aegis.tts")
+
+try:
+    from TTS.api import TTS
+    from TTS.utils.radam import RAdam
+    TTS_AVAILABLE = True
+except ImportError:
+    TTS_AVAILABLE = False
+    logger.warning("Coqui TTS not installed. English TTS will use fallback.")
 from collections import defaultdict
 from langdetect import detect
-from fugashi import Tagger
+try:
+    from fugashi import Tagger
+except ImportError:
+    Tagger = None
 
 from core.config import (
     COQUI_MODEL_EN, VOICEVOX_URL, VOICEVOX_SPEAKER_ID,
-    OUTPUT_AUDIO_FILE, TONE_MODES,
+    OUTPUT_AUDIO_FILE, TONE_MODES, ACCESSIBILITY_CONFIG
 )
-
-logger = logging.getLogger("aegis.tts")
 
 # Lazy-loaded MeCab tagger (avoids crash if dictionary not installed)
 _tagger = None
@@ -35,18 +44,20 @@ _tagger = None
 
 def _get_tagger():
     global _tagger
-    if _tagger is None:
+    if _tagger is None and Tagger is not None:
         try:
             # Try using unidic-lite dictionary path explicitly
+            import unidic_lite
+            dic_dir = unidic_lite.DICDIR
+            _tagger = Tagger(f'-d "{dic_dir}"')
+        except ImportError:
+            # Fallback to default system dictionary if unidic-lite is missing
             try:
-                import unidic_lite
-                _tagger = Tagger(f'-d "{unidic_lite.DICDIR}"')
-            except ImportError:
                 _tagger = Tagger()
-        except RuntimeError as e:
-            logger.warning(f"MeCab/fugashi init failed: {e}. "
-                           "Install 'unidic-lite' for Japanese tokenization.")
-            return None
+            except RuntimeError as e:
+                logger.warning(f"MeCab/fugashi init failed: {e}. "
+                               "Install 'unidic-lite' for Japanese tokenization.")
+                return None
     return _tagger
 
 
@@ -60,31 +71,41 @@ def clean_japanese_text(text: str) -> str:
 
 
 # ─── Coqui TTS (lazy load) ──────────────────────────────────────────────────
-_coqui_tts = None
+_coqui_tts_instance = None
 
 
 def _get_coqui():
-    global _coqui_tts
-    if _coqui_tts is None:
-        logger.info(f"Loading Coqui TTS model: {COQUI_MODEL_EN}")
-        # add_safe_globals is only available in PyTorch 2.6+
-        if hasattr(torch.serialization, "add_safe_globals"):
-            torch.serialization.add_safe_globals([RAdam, defaultdict, dict])
-        _coqui_tts = TTS(model_name=COQUI_MODEL_EN)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        _coqui_tts.to(torch.device(device))
-        logger.info(f"Coqui TTS loaded on {device}")
-    return _coqui_tts
+    global _coqui_tts_instance
+    if _coqui_tts_instance is not None:
+        return _coqui_tts_instance
+
+    if not TTS_AVAILABLE:
+        raise RuntimeError("Coqui TTS is not installed.")
+
+    logger.info(f"Loading Coqui TTS model: {COQUI_MODEL_EN}")
+    if hasattr(torch.serialization, "add_safe_globals"):
+        torch.serialization.add_safe_globals([RAdam, defaultdict, dict])
+    _coqui_tts_instance = TTS(model_name=COQUI_MODEL_EN)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _coqui_tts_instance.to(torch.device(device))
+    logger.info(f"Coqui TTS loaded on {device}")
+    return _coqui_tts_instance
 
 
 # ─── Language Detection ─────────────────────────────────────────────────────
 
 def detect_language(text: str) -> str:
-    """Detect language of text, returning 'en' or 'ja'."""
+    """Detect language of text, returning 'en', 'ja', 'es', 'fr', or 'de'."""
     try:
         lang = detect(text)
         if lang.startswith("ja"):
             return "ja"
+        elif lang.startswith("es"):
+            return "es"
+        elif lang.startswith("fr"):
+            return "fr"
+        elif lang.startswith("de"):
+            return "de"
         return "en"
     except Exception:
         return "en"
@@ -108,6 +129,50 @@ def _adapt_text_for_emotion(text: str, tone_mode: Optional[str] = None) -> str:
     }
 
     return preambles.get(tone_mode, "") + text
+
+
+def _apply_audio_effects(filepath: str, rate_factor: float, volume_factor: float) -> bool:
+    """
+    Apply rate and volume adjustments to a WAV file using soundfile and numpy/librosa.
+    This modifies the file in-place.
+    """
+    if rate_factor == 1.0 and volume_factor == 1.0:
+        return True
+        
+    try:
+        import soundfile as sf
+        import librosa
+        import numpy as np
+        
+        # Load audio
+        y, sr = librosa.load(filepath, sr=None, mono=False)
+        
+        # Apply rate change (time stretch)
+        if rate_factor != 1.0:
+            if y.ndim > 1:
+                # Process stereo channels independently
+                y = np.array([librosa.effects.time_stretch(y[0], rate=rate_factor),
+                              librosa.effects.time_stretch(y[1], rate=rate_factor)])
+            else:
+                y = librosa.effects.time_stretch(y, rate=rate_factor)
+                
+        # Apply volume change
+        if volume_factor != 1.0:
+            y = y * volume_factor
+            
+        # Ensure we don't clip
+        y = np.clip(y, -1.0, 1.0)
+        
+        # Save audio back
+        if y.ndim > 1:
+            y = y.T # transpose for soundfile (samples, channels)
+            
+        sf.write(filepath, y, sr)
+        logger.debug(f"Applied audio effects: rate={rate_factor}, volume={volume_factor}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to apply audio effects: {e}")
+        return False
 
 
 # ─── Main TTS Function ──────────────────────────────────────────────────────
@@ -140,6 +205,12 @@ def speak_text(
     if language is None:
         language = detect_language(text)
 
+    # Voice-only mode descriptions
+    if ACCESSIBILITY_CONFIG.voice_only_mode:
+        # Simplistic heuristic: if text looks like a purely visual alert or chart description, we prefix it
+        if "chart" in text.lower() or "graph" in text.lower():
+            text = f"[Visual element displayed] {text}"
+
     # Adapt text for emotional delivery
     adapted_text = _adapt_text_for_emotion(text, tone_mode)
 
@@ -149,12 +220,26 @@ def speak_text(
         success = _synthesize_japanese(adapted_text, filepath)
     elif language == "en":
         success = _synthesize_english(adapted_text, filepath)
+    elif language in ["es", "fr", "de"]:
+        # Use pyttsx3 as fallback for other languages since our Coqui model is English
+        success = _synthesize_pyttsx3(adapted_text, filepath, lang=language)
     else:
         logger.warning(f"Unsupported language: {language}, falling back to English")
         success = _synthesize_english(adapted_text, filepath)
 
-    if success and play_audio:
-        _play_audio(filepath)
+    if success:
+        # Determine overall rate and volume
+        base_rate = ACCESSIBILITY_CONFIG.speech_rate
+        if tone_mode and tone_mode in TONE_MODES:
+            base_rate *= TONE_MODES[tone_mode].get("speech_rate_factor", 1.0)
+            
+        base_volume = ACCESSIBILITY_CONFIG.speech_volume
+        
+        # Apply effects
+        _apply_audio_effects(filepath, base_rate, base_volume)
+
+        if play_audio:
+            _play_audio(filepath)
 
     return filepath if success else None
 

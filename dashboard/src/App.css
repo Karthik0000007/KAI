@@ -46,3 +46,76 @@
 .skip-link:focus {
   top: 0;
 }
+
+/* --- Accessibility Themes --- */
+
+/* High Contrast Theme */
+body.high-contrast {
+  background-color: #000 !important;
+  color: #fff !important;
+}
+
+body.high-contrast .dashboard-header {
+  background: #000 !important;
+  border-bottom: 2px solid #fff;
+  color: #fff !important;
+}
+
+body.high-contrast .dashboard-nav {
+  background: #000 !important;
+  border-bottom: 2px solid #fff;
+}
+
+body.high-contrast .dashboard-nav button {
+  color: #fff !important;
+}
+
+body.high-contrast .dashboard-nav button.active {
+  background-color: #fff !important;
+  color: #000 !important;
+  font-weight: bold;
+}
+
+body.high-contrast .card {
+  background-color: #111 !important;
+  border: 1px solid #fff;
+  color: #fff !important;
+}
+
+body.high-contrast .card h2 {
+  color: #ffeb3b !important;
+}
+
+body.high-contrast .btn-secondary,
+body.high-contrast .btn-danger {
+  background: #000 !important;
+  color: #fff !important;
+  border: 2px solid #fff !important;
+}
+
+body.high-contrast .btn-secondary:hover,
+body.high-contrast .btn-danger:hover {
+  background: #fff !important;
+  color: #000 !important;
+}
+
+/* Large Text Theme */
+body.large-text {
+  font-size: 1.25rem;
+}
+
+body.large-text h1 {
+  font-size: 2.2rem !important;
+}
+
+body.large-text h2 {
+  font-size: 1.8rem !important;
+}
+
+body.large-text .dashboard-nav button {
+  font-size: 1.25rem !important;
+}
+
+body.large-text .date-range-selector select {
+  font-size: 1.25rem !important;
+}

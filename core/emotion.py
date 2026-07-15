@@ -177,7 +177,13 @@ def classify_emotion(features: dict, transcript: Optional[str] = None, user_id: 
                 # Japanese keywords - expanded coverage
                 "ストレス", "大変", "辛い", "きつい", "プレッシャー", 
                 "締め切り", "仕事が心配", "無理", "限界", "追い詰め",
-                "やばい", "間に合わ", "手に負え"
+                "やばい", "間に合わ", "手に負え",
+                # Spanish
+                "estresado", "abrumado", "presión", "no puedo más", "demasiado",
+                # French
+                "stressé", "débordé", "pression", "trop de", "je n'en peux plus",
+                # German
+                "gestresst", "überfordert", "druck", "zu viel", "schaffe es nicht"
             ],
             "anxious": [
                 # English keywords
@@ -186,7 +192,13 @@ def classify_emotion(features: dict, transcript: Optional[str] = None, user_id: 
                 # Japanese keywords - expanded coverage
                 "不安", "怖い", "心配", "緊張", "パニック", "恐れ",
                 "ドキドキ", "息苦し", "落ち着か", "そわそわ",
-                "気になる", "気になって", "びくびく", "おびえ"
+                "気になる", "気になって", "びくびく", "おびえ",
+                # Spanish
+                "ansioso", "nervioso", "pánico", "miedo", "preocupado", "asustado",
+                # French
+                "anxieux", "nerveux", "panique", "peur", "inquiet", "effrayé",
+                # German
+                "ängstlich", "nervös", "panik", "angst", "besorgt"
             ],
             "fatigued": [
                 # English keywords
@@ -195,7 +207,13 @@ def classify_emotion(features: dict, transcript: Optional[str] = None, user_id: 
                 # Japanese keywords - expanded coverage
                 "疲れ", "眠い", "だるい", "しんどい", "疲労", "へとへと",
                 "くたくた", "ぐったり", "眠れ", "不眠", "力が出",
-                "やる気が出", "消耗", "バテ"
+                "やる気が出", "消耗", "バテ",
+                # Spanish
+                "cansado", "exhausto", "sueño", "sin energía", "agotado", "insomnio",
+                # French
+                "fatigué", "épuisé", "sommeil", "sans énergie", "vidé", "insomnie",
+                # German
+                "müde", "erschöpft", "schläfrig", "keine energie", "ausgelaugt", "schlaflos"
             ],
             "calm": [
                 # English keywords
@@ -204,7 +222,13 @@ def classify_emotion(features: dict, transcript: Optional[str] = None, user_id: 
                 # Japanese keywords - expanded coverage
                 "元気", "良い", "楽", "気持ちいい", "気持ち良", "リラックス", "穏やか",
                 "平和", "幸せ", "満足", "快適", "安心", "落ち着い",
-                "すっきり", "爽やか", "最高"
+                "すっきり", "爽やか", "最高",
+                # Spanish
+                "relajado", "pacífico", "bien", "genial", "feliz", "tranquilo",
+                # French
+                "détendu", "paisible", "bien", "super", "heureux", "calme",
+                # German
+                "entspannt", "friedlich", "gut", "großartig", "glücklich", "ruhig"
             ],
         }
         for emotion, keywords in linguistic_signals.items():
