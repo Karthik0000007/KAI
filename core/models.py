@@ -114,7 +114,9 @@ class VitalRecord:
     blood_pressure_dia: Optional[int] = None
     spo2: Optional[float] = None                # %
     temperature: Optional[float] = None         # °C
-    steps: Optional[int] = None
+    steps: Optional[int] = None                 # daily step count
+    calories: Optional[float] = None            # kcal burned
+    active_minutes: Optional[int] = None        # minutes of activity
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

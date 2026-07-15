@@ -6,3 +6,9 @@ testing.py
 __pycache__/
 data/
 .vscode/
+task_implementations/
+docs/
+demos/
+.kiro/
+.hypothesis/
+.pytest_cache/
