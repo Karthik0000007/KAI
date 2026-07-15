@@ -87,12 +87,19 @@ class HealthDatabase:
             CREATE TABLE IF NOT EXISTS vital_records (
                 id TEXT PRIMARY KEY,
                 timestamp TEXT NOT NULL,
+                vital_type TEXT NOT NULL,
+                value REAL NOT NULL,
+                unit TEXT NOT NULL,
+                device_id TEXT,
+                confidence REAL DEFAULT 1.0,
                 heart_rate INTEGER,
                 blood_pressure_sys INTEGER,
                 blood_pressure_dia INTEGER,
                 spo2 REAL,
                 temperature REAL,
-                steps INTEGER
+                steps INTEGER,
+                calories REAL,
+                active_minutes INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS proactive_alerts (
@@ -115,10 +122,23 @@ class HealthDatabase:
                 tone_mode TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS emotion_transitions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                from_emotion TEXT NOT NULL,
+                to_emotion TEXT NOT NULL,
+                from_confidence REAL NOT NULL,
+                to_confidence REAL NOT NULL,
+                timestamp TEXT NOT NULL,
+                transition_type TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_checkin_ts ON health_checkins(timestamp);
             CREATE INDEX IF NOT EXISTS idx_vital_ts ON vital_records(timestamp);
             CREATE INDEX IF NOT EXISTS idx_alert_ts ON proactive_alerts(timestamp);
             CREATE INDEX IF NOT EXISTS idx_conv_session ON conversation_history(session_id);
+            CREATE INDEX IF NOT EXISTS idx_emotion_transition_session ON emotion_transitions(session_id);
+            CREATE INDEX IF NOT EXISTS idx_emotion_transition_ts ON emotion_transitions(timestamp);
         """)
         conn.commit()
         logger.info(f"Health database initialized at {self.db_path}")
@@ -268,14 +288,55 @@ class HealthDatabase:
     def save_vital(self, vital: VitalRecord) -> str:
         data = vital.to_dict()
         conn = self._get_conn()
+        
+        # Determine vital_type, value, and unit from the VitalRecord
+        vital_type = None
+        value = None
+        unit = None
+        
+        if data.get("heart_rate") is not None:
+            vital_type = "heart_rate"
+            value = float(data["heart_rate"])
+            unit = "bpm"
+        elif data.get("spo2") is not None:
+            vital_type = "spo2"
+            value = float(data["spo2"])
+            unit = "%"
+        elif data.get("temperature") is not None:
+            vital_type = "temperature"
+            value = float(data["temperature"])
+            unit = "°C"
+        elif data.get("steps") is not None:
+            vital_type = "steps"
+            value = float(data["steps"])
+            unit = "steps"
+        elif data.get("calories") is not None:
+            vital_type = "calories"
+            value = float(data["calories"])
+            unit = "kcal"
+        elif data.get("active_minutes") is not None:
+            vital_type = "active_minutes"
+            value = float(data["active_minutes"])
+            unit = "minutes"
+        
+        # If no vital type determined, use defaults
+        if vital_type is None:
+            vital_type = "unknown"
+            value = 0.0
+            unit = ""
+        
         conn.execute("""
             INSERT OR REPLACE INTO vital_records
-            (id, timestamp, heart_rate, blood_pressure_sys, blood_pressure_dia,
-             spo2, temperature, steps)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (data["id"], data["timestamp"], data.get("heart_rate"),
+            (id, timestamp, vital_type, value, unit, device_id, confidence,
+             heart_rate, blood_pressure_sys, blood_pressure_dia,
+             spo2, temperature, steps, calories, active_minutes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (data["id"], data["timestamp"], vital_type, value, unit,
+              "unknown", 1.0,  # device_id and confidence defaults
+              data.get("heart_rate"),
               data.get("blood_pressure_sys"), data.get("blood_pressure_dia"),
-              data.get("spo2"), data.get("temperature"), data.get("steps")))
+              data.get("spo2"), data.get("temperature"), data.get("steps"),
+              data.get("calories"), data.get("active_minutes")))
         conn.commit()
         return vital.id
 
@@ -338,6 +399,76 @@ class HealthDatabase:
         )
         conn.commit()
 
+    def get_recent_alerts(self, hours: int = 24) -> List[Dict[str, Any]]:
+        """
+        Get alerts from the last N hours.
+        
+        Used for deduplication to avoid sending similar alerts too frequently.
+        
+        Args:
+            hours: Number of hours to look back (default: 24)
+            
+        Returns:
+            List of alert dictionaries
+            
+        Requirement 10.8: Deduplicate similar alerts within 24 hours
+        """
+        try:
+            cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT * FROM proactive_alerts WHERE timestamp >= ? ORDER BY timestamp DESC",
+                (cutoff,)
+            ).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d = self._decrypt_sensitive(d)
+                if d.get("context"):
+                    try:
+                        d["context"] = json.loads(d["context"])
+                    except (json.JSONDecodeError, TypeError):
+                        d["context"] = {}
+                results.append(d)
+            return results
+        except Exception as e:
+            logger.error(f"Failed to retrieve recent alerts: {e}")
+            return []
+    
+    def get_alerts_today(self) -> List[Dict[str, Any]]:
+        """
+        Get all alerts generated today.
+        
+        Used for limiting the number of alerts per day to avoid alert fatigue.
+        
+        Returns:
+            List of alert dictionaries from today
+            
+        Requirement 10.8: Avoid alert fatigue by limiting alerts to 3 per day
+        """
+        try:
+            # Get start of today (midnight)
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT * FROM proactive_alerts WHERE timestamp >= ? ORDER BY timestamp DESC",
+                (today_start,)
+            ).fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d = self._decrypt_sensitive(d)
+                if d.get("context"):
+                    try:
+                        d["context"] = json.loads(d["context"])
+                    except (json.JSONDecodeError, TypeError):
+                        d["context"] = {}
+                results.append(d)
+            return results
+        except Exception as e:
+            logger.error(f"Failed to retrieve today's alerts: {e}")
+            return []
+
     # ─── Conversation History ────────────────────────────────────────────
 
     def save_conversation_turn(self, session_id: str, turn: ConversationTurn):
@@ -393,3 +524,103 @@ class HealthDatabase:
                 pass
             results.append(d)
         return results
+
+    # ─── Emotion Transitions ─────────────────────────────────────────────
+
+    def save_emotion_transition(self, session_id: str, transition: Dict[str, Any]):
+        """
+        Save an emotion transition to the database.
+        
+        Args:
+            session_id: The session ID
+            transition: Dictionary with transition information
+        
+        Implements graceful degradation:
+        - Retries on database locks
+        - Logs error and continues on failure
+        """
+        try:
+            conn = self._get_conn()
+            
+            # Retry logic for database locks
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    conn.execute("""
+                        INSERT INTO emotion_transitions
+                        (session_id, from_emotion, to_emotion, from_confidence, 
+                         to_confidence, timestamp, transition_type)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        session_id,
+                        transition["from_emotion"],
+                        transition["to_emotion"],
+                        transition["from_confidence"],
+                        transition["to_confidence"],
+                        transition["timestamp"],
+                        transition["transition_type"]
+                    ))
+                    conn.commit()
+                    logger.info(f"Saved emotion transition: {transition['transition_type']}")
+                    return
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e).lower() or "busy" in str(e).lower():
+                        if attempt < max_retries - 1:
+                            import time
+                            wait_time = 0.1 * (2 ** attempt)
+                            logger.warning(f"Database locked, retrying in {wait_time}s...")
+                            time.sleep(wait_time)
+                            continue
+                    raise
+        except Exception as e:
+            logger.error(f"Failed to save emotion transition: {e}. Transition may be lost.")
+
+    def get_emotion_transitions(self, session_id: Optional[str] = None, 
+                               days: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get emotion transitions from the database.
+        
+        Args:
+            session_id: Optional session ID to filter by
+            days: Optional number of days to look back
+        
+        Returns:
+            List of emotion transition dictionaries
+        
+        Implements graceful degradation:
+        - Returns empty list on database errors
+        """
+        try:
+            conn = self._get_conn()
+            
+            if session_id and days:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+                rows = conn.execute("""
+                    SELECT * FROM emotion_transitions 
+                    WHERE session_id = ? AND timestamp >= ?
+                    ORDER BY timestamp DESC
+                """, (session_id, cutoff)).fetchall()
+            elif session_id:
+                rows = conn.execute("""
+                    SELECT * FROM emotion_transitions 
+                    WHERE session_id = ?
+                    ORDER BY timestamp DESC
+                """, (session_id,)).fetchall()
+            elif days:
+                cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+                rows = conn.execute("""
+                    SELECT * FROM emotion_transitions 
+                    WHERE timestamp >= ?
+                    ORDER BY timestamp DESC
+                """, (cutoff,)).fetchall()
+            else:
+                rows = conn.execute("""
+                    SELECT * FROM emotion_transitions 
+                    ORDER BY timestamp DESC
+                """).fetchall()
+            
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"Failed to retrieve emotion transitions: {e}")
+            return []
+

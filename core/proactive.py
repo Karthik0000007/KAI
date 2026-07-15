@@ -419,7 +419,96 @@ class ProactiveEngine:
                     ),
                     context={"max_hr": max_hr},
                 ))
+        
+        # Check for sustained elevated heart rate (Requirement 12.14)
+        alerts.extend(self._check_elevated_heart_rate())
 
+        return alerts
+    
+    def _check_elevated_heart_rate(self) -> List[ProactiveAlert]:
+        """
+        Detect sustained high heart rate (> 100 bpm for 10+ minutes).
+        
+        Requirements: 12.14
+        """
+        alerts = []
+        
+        # Get vitals from the past hour
+        vitals = self.db.get_recent_vitals(days=1)
+        if not vitals:
+            return alerts
+        
+        # Filter for heart rate readings
+        hr_readings = []
+        for v in vitals:
+            if v.get("vital_type") == "heart_rate" or v.get("heart_rate"):
+                try:
+                    timestamp = datetime.fromisoformat(v["timestamp"])
+                    value = v.get("value") or v.get("heart_rate")
+                    if value:
+                        hr_readings.append({
+                            "timestamp": timestamp,
+                            "value": float(value)
+                        })
+                except (ValueError, KeyError, TypeError):
+                    continue
+        
+        if len(hr_readings) < 2:
+            return alerts
+        
+        # Sort by timestamp
+        hr_readings.sort(key=lambda x: x["timestamp"])
+        
+        # Look for sustained elevated heart rate (>100 bpm for 10+ minutes)
+        elevated_threshold = 100  # bpm
+        sustained_duration = timedelta(minutes=10)
+        
+        # Find sequences of elevated readings
+        elevated_start = None
+        for reading in hr_readings:
+            if reading["value"] > elevated_threshold:
+                if elevated_start is None:
+                    elevated_start = reading["timestamp"]
+                else:
+                    # Check if sustained for 10+ minutes
+                    duration = reading["timestamp"] - elevated_start
+                    if duration >= sustained_duration:
+                        # Found sustained elevated heart rate
+                        avg_hr = sum(r["value"] for r in hr_readings 
+                                   if elevated_start <= r["timestamp"] <= reading["timestamp"]) / \
+                                len([r for r in hr_readings 
+                                    if elevated_start <= r["timestamp"] <= reading["timestamp"]])
+                        
+                        alerts.append(ProactiveAlert(
+                            alert_type="sustained_elevated_hr",
+                            severity="warning",
+                            message=(
+                                f"Your heart rate has been elevated (average {avg_hr:.0f} bpm) "
+                                f"for over 10 minutes. If you're not exercising and this continues, "
+                                f"consider taking a break and doing some deep breathing. "
+                                f"If you experience chest pain, dizziness, or shortness of breath, "
+                                f"seek medical attention."
+                            ),
+                            explanation=(
+                                f"This alert was generated because your heart rate remained above "
+                                f"{elevated_threshold} bpm for at least {duration.total_seconds() / 60:.0f} minutes, "
+                                f"with an average of {avg_hr:.0f} bpm during this period. "
+                                f"Sustained elevated heart rate without physical activity can indicate "
+                                f"stress, anxiety, dehydration, or other conditions requiring attention."
+                            ),
+                            context={
+                                "avg_hr": round(avg_hr, 1),
+                                "duration_minutes": round(duration.total_seconds() / 60, 1),
+                                "threshold": elevated_threshold
+                            },
+                        ))
+                        
+                        # Only alert once per sustained period
+                        break
+            else:
+                # Reset if heart rate drops below threshold
+                elevated_start = None
+        
         return alerts
 
     def _check_emotion_pattern(self) -> List[ProactiveAlert]:
