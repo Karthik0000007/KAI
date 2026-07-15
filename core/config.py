@@ -91,6 +91,19 @@ class ProactiveConfig:
 PROACTIVE_CONFIG = ProactiveConfig()
 
 
+# ─── Accessibility ────────────────────────────────────────────────────────────
+@dataclass
+class AccessibilityConfig:
+    """Accessibility preferences for Voice, TTS and Dashboard."""
+    voice_only_mode: bool = False             # true for audio descriptions
+    speech_rate: float = 1.0                  # >1 is faster, <1 is slower
+    speech_volume: float = 1.0                # >1 is louder, <1 is softer
+    high_contrast: bool = False               # true for high contrast dashboard
+    large_text: bool = False                  # true for large text dashboard
+
+ACCESSIBILITY_CONFIG = AccessibilityConfig()
+
+
 # ─── Health Check-in ────────────────────────────────────────────────────────
 DAILY_CHECKIN_QUESTIONS = [
     "How are you feeling today?",
@@ -647,3 +660,57 @@ class ConfigManager:
             return False
         else:
             raise ValueError(f"Cannot parse '{value}' as boolean")
+
+
+# ─── User Preferences Management ─────────────────────────────────────────────
+import json
+USER_PREFS_FILE = DATA_DIR / "user_preferences.json"
+
+def load_user_preferences() -> None:
+    """Load user preferences from JSON and override global configs."""
+    if not USER_PREFS_FILE.exists():
+        return
+
+    try:
+        with open(USER_PREFS_FILE, "r", encoding="utf-8") as f:
+            prefs = json.load(f)
+            
+            # Privacy settings
+            if "dp_epsilon" in prefs:
+                global DP_EPSILON
+                DP_EPSILON = prefs["dp_epsilon"]
+            if "retention_days" in prefs:
+                global DATA_RETENTION_DAYS
+                DATA_RETENTION_DAYS = prefs["retention_days"]
+                
+            # Accessibility settings
+            if "voice_only_mode" in prefs:
+                ACCESSIBILITY_CONFIG.voice_only_mode = prefs["voice_only_mode"]
+            if "speech_rate" in prefs:
+                ACCESSIBILITY_CONFIG.speech_rate = prefs["speech_rate"]
+            if "speech_volume" in prefs:
+                ACCESSIBILITY_CONFIG.speech_volume = prefs["speech_volume"]
+                
+            # Basic preferences
+            if "language" in prefs:
+                global LANGUAGE
+                LANGUAGE = prefs["language"]
+            if "tts_voice" in prefs:
+                global TTS_VOICE
+                TTS_VOICE = prefs["tts_voice"]
+                
+    except Exception as e:
+        print(f"Error loading user preferences: {e}")
+
+def save_user_preferences(prefs: dict) -> None:
+    """Save user preferences dict to JSON."""
+    try:
+        with open(USER_PREFS_FILE, "w", encoding="utf-8") as f:
+            json.dump(prefs, f, indent=4)
+        # Apply them immediately
+        load_user_preferences()
+    except Exception as e:
+        print(f"Error saving user preferences: {e}")
+
+# Load preferences at startup
+load_user_preferences()

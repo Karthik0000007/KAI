@@ -173,6 +173,45 @@ async def main():
             print_status("STT", f'"{text}"', "speech")
             print_status("LANG", lang.upper(), "globe")
             print_status("EMOTION", f"{emotion.label} ({emotion.confidence:.0%})", "heart")
+            
+            # In-conversation help system interception
+            help_triggers = ["what can you do", "help", "how to use", "commands"]
+            text_lower = text.lower()
+            if any(trigger in text_lower for trigger in help_triggers):
+                help_msg = (
+                    "I am Aegis, your offline health AI companion. Here's what I can do:\n"
+                    "1. Track your daily health (sleep, mood, pain, medication).\n"
+                    "2. Detect your emotions from your voice.\n"
+                    "3. Provide proactive health alerts.\n"
+                    "4. All your data stays private and encrypted locally."
+                )
+                print_status("AEGIS", help_msg, "robot")
+                await speak_text_async(help_msg, language=lang, tone_mode="neutral")
+                
+                # Turn ends early
+                turn_duration = (datetime.now() - turn_start_time).total_seconds()
+                await event_bus.emit("pipeline.turn_completed", {
+                    "turn_number": turn_count,
+                    "duration_seconds": turn_duration,
+                    "timestamp": datetime.now().isoformat()
+                })
+                print()
+                continue
+
+            # Add emotion to session history
+            session.add_emotion(emotion)
+            
+            # Detect emotion transitions
+            transition = session.detect_emotion_transition()
+            if transition:
+                print_status("TRANSITION", 
+                           f"{transition['from_emotion']} → {transition['to_emotion']}", 
+                           "arrow")
+                logger.info(f"Emotion transition detected: {transition['transition_type']}")
+                await event_bus.emit("emotion.transition_detected", transition)
+                
+                # Save transition to database (async)
+                await asyncio.to_thread(db.save_emotion_transition, session.id, transition)
 
             # Note: Emotion analysis duration is included in STT duration since they run in parallel
             # Emit emotion analyzed event
@@ -187,7 +226,7 @@ async def main():
             print_status("TONE", tone_mode, "note")
 
             # 3) Extract health signals from text (async)
-            health_signals = await extract_health_signals_async(text)
+            health_signals = await extract_health_signals_async(text, language=lang)
             if health_signals:
                 print_status("HEALTH", str(health_signals), "vitals")
                 await event_bus.emit("health.signals_extracted", {
